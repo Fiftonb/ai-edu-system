@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>后台管理 - 用户反馈</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>视频学习平台 - 管理后台</h1>
+      </div>
+      <div id="userInfo"></div>
+    </header>
+
+    <!-- 用户管理模块 -->
+    <div class="card">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">用户管理</h2>
+      </div>
+      <table id="userTable">
+        <thead>
+          <tr>
+            <th>用户名</th>
+            <th>角色</th>
+            <th>注册时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    
+    <!-- 用户反馈模块 -->
+    <div class="card">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">用户反馈</h2>
+      </div>
+      <div id="feedbackList"></div>
+    </div>
+
+    <footer>
+      &copy; 2025 视频学习平台 - 管理后台
+    </footer>
+  </div>
+
+  <script>
+    // 加载用户信息并检查管理员权限
+    async function loadUserInfo() {
+      try {
+        // 发送用户信息请求，携带同源 Cookie
+        const res = await fetch('/userinfo', { credentials: 'same-origin' });
+        // 如果未登录，跳转登录页
+        if (res.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+        // 处理其他错误
+        if (!res.ok) {
+          alert('获取用户信息失败: ' + res.status);
+          return;
+        }
+        const data = await res.json();
+        let html = `欢迎，${data.username} <a href="/logout" class="btn btn-secondary">登出</a>`;
+        if (data.role === 'admin') {
+          html += ' <a href="/" class="btn btn-primary">返回首页</a>';
+        }
+        document.getElementById('userInfo').innerHTML = html;
+        if (data.role !== 'admin') {
+          alert('权限不足');
+          window.location.href = '/';
+        }
+      } catch {
+        window.location.href = '/login.html';
+      }
+    }
+    loadUserInfo();
+
+    // 加载用户列表
+    async function loadAdminUsers() {
+      try {
+        const res = await fetch('/admin/users', { credentials: 'same-origin' });
+        if (!res.ok) { alert('获取用户列表失败: ' + res.status); return; }
+        const list = await res.json();
+        const tbody = document.querySelector('#userTable tbody');
+        tbody.innerHTML = '';
+        list.forEach(u => {
+          const tr = document.createElement('tr');
+          const created = new Date(u.createdAt).toLocaleString();
+          tr.innerHTML = `
+            <td>${u.username}</td>
+            <td>
+              <select data-username="${u.username}" class="role-select">
+                <option value="user"${u.role==='user'? ' selected':''}>user</option>
+                <option value="admin"${u.role==='admin'? ' selected':''}>admin</option>
+              </select>
+            </td>
+            <td>${created}</td>
+            <td><button data-username="${u.username}" class="btn btn-accent delete-user-btn">删除</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+        // 绑定角色修改事件
+        document.querySelectorAll('.role-select').forEach(sel => {
+          sel.onchange = async () => {
+            const username = sel.dataset.username;
+            const role = sel.value;
+            const resp = await fetch(`/admin/user/${username}/role`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ role })
+            });
+            if (resp.ok) alert('角色更新成功');
+            else alert('角色更新失败: ' + resp.status);
+          };
+        });
+        // 绑定删除用户事件
+        document.querySelectorAll('.delete-user-btn').forEach(btn => {
+          btn.onclick = async () => {
+            if (!confirm(`确定删除用户 ${btn.dataset.username}？`)) return;
+            const resp = await fetch(`/admin/user/${btn.dataset.username}`, {
+              method: 'DELETE',
+              credentials: 'same-origin'
+            });
+            if (resp.ok) {
+              alert('删除成功');
+              loadAdminUsers();
+            } else alert('删除失败: ' + resp.status);
+          };
+        });
+      } catch (e) { console.error('加载用户列表失败', e); alert('加载用户列表失败'); }
+    }
+    loadAdminUsers();
+
+    // 加载所有用户反馈
+    async function loadAdminFeedback() {
+      try {
+        const res = await fetch('/admin/feedback', { credentials: 'same-origin' });
+        if (res.status !== 200) {
+          alert('获取反馈失败: ' + res.status);
+          return;
+        }
+        const list = await res.json();
+        const container = document.getElementById('feedbackList');
+        container.innerHTML = '';
+        
+        if (list.length === 0) {
+          container.innerHTML = '<p>暂无用户反馈</p>';
+          return;
+        }
+        
+        list.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'feedback-item';
+          
+          const info = document.createElement('div');
+          info.className = 'feedback-info';
+          info.textContent = `${item.username} 于 ${new Date(item.timestamp).toLocaleString()}`;
+          
+          const content = document.createElement('div');
+          content.textContent = item.content;
+          
+          const actions = document.createElement('div');
+          actions.className = 'feedback-actions';
+          
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'btn btn-accent';
+          deleteBtn.textContent = '删除';
+          deleteBtn.onclick = async () => {
+            if (!confirm('确认删除这条反馈？')) return;
+            const resp = await fetch(`/admin/feedback/${item.timestamp}`, {
+              method: 'DELETE',
+              credentials: 'same-origin'
+            });
+            if (resp.ok) {
+              alert('删除成功');
+              loadAdminFeedback();
+            } else {
+              alert('删除失败: ' + resp.status);
+            }
+          };
+          
+          actions.appendChild(deleteBtn);
+          div.appendChild(info);
+          div.appendChild(content);
+          div.appendChild(actions);
+          container.appendChild(div);
+        });
+      } catch (e) {
+        console.error('加载反馈失败', e);
+        alert('加载反馈失败');
+      }
+    }
+    loadAdminFeedback();
+  </script>
+</body>
+</html> 
