@@ -5,10 +5,6 @@ const fs = require('fs');
 const axios = require('axios');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-<<<<<<< HEAD
-const ffmpeg = require('fluent-ffmpeg');
-=======
->>>>>>> b6afef369a9f5552fc446e59c5f550c9a80807d6
 
 // 引入 MySQL 数据库连接和视频初始化脚本
 const { query, testConnection, initDB } = require('./db/mysql');
@@ -18,7 +14,6 @@ const port = 3001;
 
 // 数据文件路径和初始化
 const dataDir = path.join(__dirname, 'data');
-const usersFile = path.join(dataDir, 'users.json');
 const feedbackFile = path.join(dataDir, 'feedback.json');
 const watchFile = path.join(dataDir, 'watch.json');
 const videoDataFile = path.join(dataDir, 'videos.json');
@@ -27,7 +22,6 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir);
 }
 // 确保 JSON 文件存在
-if (!fs.existsSync(usersFile)) fs.writeFileSync(usersFile, '[]');
 if (!fs.existsSync(feedbackFile)) fs.writeFileSync(feedbackFile, '[]');
 if (!fs.existsSync(watchFile)) fs.writeFileSync(watchFile, '[]');
 if (!fs.existsSync(videoDataFile)) fs.writeFileSync(videoDataFile, '{}');
@@ -152,11 +146,7 @@ app.get('/', (req, res) => {
 });
 
 // 创建上传目录
-<<<<<<< HEAD
 const uploadDir = path.join(__dirname, 'uploads');
-=======
-const uploadDir = 'uploads';
->>>>>>> b6afef369a9f5552fc446e59c5f550c9a80807d6
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
 }
@@ -173,21 +163,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-<<<<<<< HEAD
-// 从视频元数据中提取标题
-async function getVideoTitleFromMetadata(filePath) {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) return reject(err);
-      const tags = metadata && metadata.format && metadata.format.tags;
-      const title = tags && (tags.title || tags.TITLE);
-      resolve(title || null);
-    });
-  });
-}
-
-=======
->>>>>>> b6afef369a9f5552fc446e59c5f550c9a80807d6
 // 通用分类函数
 async function classifyVideo(title) {
   try {
