@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>视频学习平台</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <header>
+    <h1>视频学习平台</h1>
+    <div id="userInfo"></div>
+  </header>
+
+  <div class="container">
+    <!-- 上传视频模块 -->
+    <div class="card">
+    <h2>上传视频</h2>
+    <form id="uploadForm">
+      <input type="file" id="videoFiles" accept="video/*" multiple required>
+        <button type="submit" class="btn btn-primary">批量上传</button>
+    </form>
+      <progress id="uploadProgress" value="0" max="100" style="display:none; width:100%; margin-top:10px;"></progress>
+  </div>
+
+    <!-- 视频列表模块 -->
+    <div class="card">
+    <h2>视频列表</h2>
+      <div id="categoryFilters" class="category-filters" style="margin-bottom:15px;"></div>
+      <div id="videoList" class="video-container"></div>
+    </div>
+
+    <!-- 用户反馈模块 -->
+    <div class="card" id="feedbackSection">
+      <h2>用户反馈</h2>
+      <textarea id="feedbackInput" rows="4" placeholder="请输入您的反馈"></textarea>
+      <button id="feedbackSubmit" class="btn btn-primary">提交反馈</button>
+      <div id="feedbackList" style="margin-top:15px;"></div>
+    </div>
+
+    <!-- 学习进度模块 -->
+    <div class="card" id="learningSection">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">学习进度</h2>
+        <button id="clearHistory" class="btn btn-secondary">初始化学习记录</button>
+      </div>
+      <div id="progressReport" class="progress-container">加载中...</div>
+    </div>
+
+    <!-- 智能推荐模块 -->
+    <div class="card" id="recommendationSection">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">智能推荐</h2>
+        <button id="refreshRec" class="btn btn-primary">重新推荐</button>
+      </div>
+      <div id="recommendResult">加载中...</div>
+    </div>
+
+    <footer>
+      &copy; 2025 视频学习平台 - 提升您的学习体验
+    </footer>
+  </div>
+
+  <!-- AI 对话入口 -->
+  <button id="openChatBtn" class="btn btn-primary" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">AI 对话</button>
+  <div id="chatModal" style="display:none;position:fixed;bottom:60px;right:20px;width:320px;height:400px;background:#fff;box-shadow:0 0 10px rgba(0,0,0,0.3);border-radius:8px;z-index:1001;overflow:hidden;">
+    <div style="width:100%;height:100%;display:flex;flex-direction:column;position:relative;">
+      <div style="padding:10px;background:#f1f1f1;display:flex;justify-content:space-between;align-items:center;">
+        <span>AI 对话</span>
+        <button id="closeChatBtn" class="btn btn-accent">关闭</button>
+      </div>
+      <div id="chatMessages" style="flex:1;padding:10px;overflow-y:auto;background:#fafafa;"></div>
+      <div style="padding:10px;background:#f1f1f1;display:flex;">
+        <input id="chatInput" type="text" placeholder="输入消息" style="flex:1;margin-right:10px;">
+        <button id="sendChatBtn" class="btn btn-primary">发送</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 获取并显示用户信息
+    async function loadUserInfo() {
+      try {
+        const res = await fetch('/userinfo', { credentials: 'same-origin', cache: 'no-store' });
+        // 如果未登录或无权限，则跳转登录页
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = '/login.html';
+          return;
+        }
+        const data = await res.json();
+        console.log('userinfo data:', data);
+        // 显示用户信息及登出，若为管理员则显示后台管理链接
+        let html = `欢迎，${data.username} <a href="/logout" class="btn btn-secondary" style="margin-left:10px;">登出</a>`;
+        // 如果用户是 admin，添加后台管理入口
+        if (data.role === 'admin' || data.username === 'admin') {
+          html += ' <a href="/admin.html" class="btn btn-primary" style="margin-left:10px;">后台管理</a>';
+        }
+        document.getElementById('userInfo').innerHTML = html;
+      } catch (e) {
+        console.error('加载用户信息失败', e);
+        window.location.href = '/login.html';
+      }
+    }
+    loadUserInfo();
+    
+    // 加载用户反馈
+    async function loadFeedback() {
+      try {
+        const res = await fetch('/feedback', { credentials: 'same-origin' });
+        const list = await res.json();
+        const container = document.getElementById('feedbackList');
+        container.innerHTML = '';
+        
+        if (list.length === 0) {
+          container.innerHTML = '<p>暂无反馈记录</p>';
+          return;
+        }
+        
+        list.forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'feedback-item';
+          const info = document.createElement('div');
+          info.className = 'feedback-info';
+          info.textContent = `${new Date(item.timestamp).toLocaleString()}`;
+          const content = document.createElement('div');
+          content.textContent = item.content;
+          div.appendChild(info);
+          div.appendChild(content);
+          container.appendChild(div);
+        });
+      } catch (e) {
+        console.error('加载反馈失败', e);
+        container.innerHTML = '<p>加载反馈失败</p>';
+      }
+    }
+    loadFeedback();
+    
+    // 分类筛选和显示逻辑
+    const categories = ['语文', '数学', '英语', '其他'];
+    let selectedCategory = 'all';
+
+    function renderCategoryFilters() {
+      const container = document.getElementById('categoryFilters');
+      container.innerHTML = '';
+      const allBtn = document.createElement('button');
+      allBtn.textContent = '全部';
+      allBtn.className = selectedCategory === 'all' ? 'btn btn-primary' : 'btn btn-outline';
+      allBtn.style.marginRight = '10px';
+      allBtn.onclick = () => { selectedCategory = 'all'; renderCategoryFilters(); loadVideos(); };
+      container.appendChild(allBtn);
+      
+      categories.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.textContent = cat;
+        btn.className = selectedCategory === cat ? 'btn btn-primary' : 'btn btn-outline';
+        btn.style.marginRight = '10px';
+        btn.onclick = () => { selectedCategory = cat; renderCategoryFilters(); loadVideos(); };
+        container.appendChild(btn);
+      });
+    }
+
+    // 文件上传逻辑
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const videoFiles = document.getElementById('videoFiles').files;
+
+      if (videoFiles.length === 0) {
+        alert('请选择视频文件');
+        return;
+      }
+
+      const formData = new FormData();
+      for (let i = 0; i < videoFiles.length; i++) {
+        formData.append('videos', videoFiles[i]);
+      }
+
+      try {
+        const progressEl = document.getElementById('uploadProgress');
+        const uploadBtn = document.querySelector('#uploadForm button[type="submit"]');
+        progressEl.style.display = 'block';
+        uploadBtn.disabled = true;
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/uploadBatch');
+        xhr.withCredentials = true;
+        xhr.upload.onprogress = function (event) {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            progressEl.value = percent;
+          }
+        };
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState === 4) {
+            uploadBtn.disabled = false;
+            progressEl.style.display = 'none';
+            if (xhr.status === 200) {
+              let result;
+              try { result = JSON.parse(xhr.responseText); } catch { alert('上传失败: 响应非 JSON'); return; }
+        if (result.success) {
+                alert('批量上传成功');
+          document.getElementById('videoFiles').value = '';
+                loadVideos();
+        } else {
+          alert('上传失败');
+        }
+            } else {
+              alert('上传失败: ' + xhr.status);
+            }
+          }
+        };
+        xhr.onerror = function () {
+          uploadBtn.disabled = false;
+          progressEl.style.display = 'none';
+          alert('上传失败: 网络错误');
+        };
+        xhr.send(formData);
+      } catch (error) {
+        console.error('上传失败:', error);
+        alert('上传失败');
+      }
+    });
+    
+    // 绑定反馈提交
+    document.getElementById('feedbackSubmit').addEventListener('click', async () => {
+      const content = document.getElementById('feedbackInput').value.trim();
+      if (!content) {
+        alert('请输入反馈内容');
+        return;
+      }
+      try {
+        const res = await fetch('/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ content })
+        });
+        if (res.ok) {
+          alert('反馈提交成功');
+          document.getElementById('feedbackInput').value = '';
+          loadFeedback();
+        } else {
+          alert('反馈提交失败: ' + res.status);
+        }
+      } catch (error) {
+        console.error('提交反馈失败:', error);
+        alert('提交反馈失败');
+      }
+    });
+
+    async function loadVideos() {
+      try {
+        // 获取视频列表，携带同源 Cookie
+        const response = await fetch('/videos', { credentials: 'same-origin' });
+        const videos = await response.json();
+        // 为每个视频解析 uploadTime 并排序
+        const videosWithTs = videos.map(v => {
+          return {
+            ...v,
+            ts: new Date(v.uploadTime).getTime()
+          };
+        }).sort((a, b) => b.ts - a.ts);
+
+        const container = document.getElementById('videoList');
+        container.innerHTML = '';
+        
+        // 如果有分类筛选，则应用
+        const filteredVideos = selectedCategory === 'all' 
+          ? videosWithTs 
+          : videosWithTs.filter(v => v.category === selectedCategory);
+          
+        if (filteredVideos.length === 0) {
+          container.innerHTML = '<p>当前分类下暂无视频</p>';
+          return;
+        }
+
+        filteredVideos.forEach(video => {
+          const videoDiv = document.createElement('div');
+          videoDiv.className = 'video-item';
+          
+          const videoEl = document.createElement('video');
+          videoEl.controls = true;
+          videoEl.width = 280;
+          
+          const source = document.createElement('source');
+          source.src = video.path || video.videoPath;
+          source.type = 'video/mp4';
+          
+          videoEl.appendChild(source);
+          
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'video-info';
+          
+          const title = document.createElement('div');
+          title.className = 'video-title';
+          title.textContent = video.title || (video.path || video.videoPath).split('/').pop();
+          
+          const meta = document.createElement('div');
+          meta.className = 'video-meta';
+          meta.innerHTML = `
+            <span>分类: ${video.category || '未分类'}</span>
+            <span style="margin-left:10px;">上传时间: ${new Date(video.uploadTime).toLocaleString()}</span>
+          `;
+          
+          const actions = document.createElement('div');
+          actions.style.marginTop = '10px';
+          
+          // 分类设置按钮
+          if (video.category) {
+            const catBtn = document.createElement('span');
+            catBtn.textContent = `修改分类`;
+            catBtn.className = 'btn btn-outline';
+            catBtn.style.fontSize = '12px';
+            catBtn.onclick = async (e) => {
+              e.stopPropagation();
+              const newCategory = prompt('请选择分类（语文/数学/英语/其他）:', video.category);
+              if (!newCategory || !categories.includes(newCategory)) {
+                alert('请输入有效分类');
+                return;
+              }
+              try {
+                const videoPath = video.path || video.videoPath;
+                const res = await fetch(`/video/${encodeURIComponent(videoPath)}/category`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin',
+                  body: JSON.stringify({ category: newCategory })
+                });
+                if (res.ok) {
+                  alert('更新分类成功');
+                  loadVideos();
+                } else {
+                  alert('更新分类失败: ' + res.status);
+                }
+              } catch (error) {
+                console.error('更新分类失败:', error);
+                alert('更新分类失败');
+              }
+            };
+            actions.appendChild(catBtn);
+          } else {
+            const catBtn = document.createElement('span');
+            catBtn.textContent = `设置分类`;
+            catBtn.className = 'btn btn-outline';
+            catBtn.style.fontSize = '12px';
+            catBtn.onclick = async (e) => {
+              e.stopPropagation();
+              const newCategory = prompt('请选择分类（语文/数学/英语/其他）:');
+              if (!newCategory || !categories.includes(newCategory)) {
+                alert('请输入有效分类');
+                return;
+              }
+              try {
+                const videoPath = video.path || video.videoPath;
+                const res = await fetch(`/video/${encodeURIComponent(videoPath)}/category`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin',
+                  body: JSON.stringify({ category: newCategory })
+                });
+                if (res.ok) {
+                  alert('设置分类成功');
+                  loadVideos();
+                } else {
+                  alert('设置分类失败: ' + res.status);
+                }
+              } catch (error) {
+                console.error('设置分类失败:', error);
+                alert('设置分类失败');
+              }
+            };
+            actions.appendChild(catBtn);
+          }
+          
+          // 删除按钮
+          const deleteBtn = document.createElement('span');
+          deleteBtn.textContent = `删除`;
+          deleteBtn.className = 'btn btn-accent';
+          deleteBtn.style.fontSize = '12px';
+          deleteBtn.style.marginLeft = '10px';
+          deleteBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (!confirm(`确定删除视频 ${video.title || (video.path || video.videoPath).split('/').pop()}?`)) return;
+            try {
+              const videoPath = video.path || video.videoPath;
+              const res = await fetch(`/video?path=${encodeURIComponent(videoPath)}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+              });
+              if (res.ok) {
+                alert('删除成功');
+                loadVideos();
+              } else {
+                alert('删除失败: ' + res.status);
+              }
+            } catch (error) {
+              console.error('删除视频失败:', error);
+              alert('删除失败');
+            }
+          };
+          actions.appendChild(deleteBtn);
+          
+          infoDiv.appendChild(title);
+          infoDiv.appendChild(meta);
+          infoDiv.appendChild(actions);
+          
+          videoDiv.appendChild(videoEl);
+          videoDiv.appendChild(infoDiv);
+          
+          container.appendChild(videoDiv);
+        });
+        
+        // 学习数据埋点：视频播放完成上报
+        document.querySelectorAll('#videoList video').forEach(videoEl => {
+          const src = videoEl.querySelector('source').getAttribute('src');
+          // 播放开始上报点击次数
+          videoEl.addEventListener('play', async () => {
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoPath: src, completed: false })
+            });
+            // 刷新学习进度
+            loadLearningData();
+          });
+          // 播放进度上报（paused 或 timeupdate）
+          videoEl.addEventListener('pause', async () => {
+            const progress = videoEl.currentTime / videoEl.duration;
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoPath: src, completed: false, progress })
+            });
+            // 刷新学习进度
+            loadLearningData();
+          });
+          // 播放结束上报完成
+          videoEl.addEventListener('ended', async () => {
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoPath: src, completed: true })
+            });
+            // 刷新学习进度
+            loadLearningData();
+          });
+        });
+      } catch (error) {
+        console.error('加载视频失败:', error);
+        document.getElementById('videoList').innerHTML = '<p>加载视频失败</p>';
+      }
+    }
+    renderCategoryFilters();
+    loadVideos();
+    // 加载学习进度
+    async function loadLearningData() {
+      try {
+        const res = await fetch('/report/progress', { credentials: 'same-origin' });
+        const data = await res.json();
+        const el = document.getElementById('progressReport');
+        if (data.success) {
+          const details = data.report.details;
+          if (details.length === 0) {
+            el.innerText = '暂无学习记录';
+          } else {
+            let html = '<ul class="progress-list">';
+            details.forEach(d => {
+              const count = typeof d.clickCount === 'number' ? d.clickCount : 0;
+              const pct = typeof d.highestProgress === 'number' ? (d.highestProgress * 100).toFixed(2) : '0.00';
+              html += `<li>
+                <div class="progress-title">${d.title || d.videoPath}</div>
+                <div class="progress-info">点击次数: ${count}, 最高进度: ${pct}%</div>
+                <div class="progress-date">${new Date(d.timestamp).toLocaleString()}</div>
+              </li>`;
+            });
+            html += '</ul>';
+            el.innerHTML = html;
+          }
+        } else {
+          el.innerText = '获取学习进度失败';
+        }
+      } catch (e) {
+        console.error('加载学习进度失败', e);
+        document.getElementById('progressReport').innerText = '加载学习进度失败';
+      }
+    }
+    // 加载智能推荐
+    async function loadRecommendation() {
+      try {
+        const res = await fetch('/recommendation', { credentials: 'same-origin' });
+        const data = await res.json();
+        const el = document.getElementById('recommendResult');
+        if (data.success) {
+          const rec = data.recommendation;
+          // 使用嵌入式视频播放器展示推荐视频
+          el.innerHTML = `
+            <div class="video-item">
+              <div class="video-title">推荐视频: ${rec.title}</div>
+              <video controls width="100%" style="max-width:500px; margin-top:10px;">
+                <source src="${rec.videoPath}" type="video/mp4">
+                您的浏览器不支持视频播放。
+              </video>
+            </div>
+          `;
+        } else {
+          el.innerText = data.message || '无推荐';
+        }
+      } catch (e) {
+        console.error('加载推荐失败', e);
+        document.getElementById('recommendResult').innerText = '加载推荐失败';
+      }
+    }
+    document.getElementById('refreshRec').onclick = loadRecommendation;
+    // 初始化学习进度与推荐加载
+    loadLearningData();
+    loadRecommendation();
+    // 初始化学习记录按钮事件
+    document.getElementById('clearHistory').onclick = async () => {
+      if (!confirm('确定要清空所有学习记录？')) return;
+      try {
+        const res = await fetch('/watch-history', { method: 'DELETE', credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.success) {
+          alert('学习记录已清空');
+          loadLearningData();
+        } else {
+          alert('清空失败: ' + (data.message || '未知错误'));
+        }
+      } catch (e) {
+        console.error('清空学习记录失败', e);
+        alert('清空失败');
+      }
+    };
+  </script>
+  <script src="/js/chat.js"></script>
+</body>
+</html> 
