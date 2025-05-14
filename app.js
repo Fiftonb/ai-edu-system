@@ -149,7 +149,7 @@ app.get('/', (req, res) => {
 });
 
 // 创建上传目录
-const uploadDir = 'uploads';
+const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir);
 }
