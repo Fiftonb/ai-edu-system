@@ -1,0 +1,13 @@
+# Node modules
+node_modules/
+
+# Ignore mp4 video files
+*.mp4
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Environment variables
+.env 
