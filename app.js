@@ -6,8 +6,10 @@ const axios = require('axios');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 
-// 引入 MySQL 数据库连接和视频初始化脚本
-const { query, testConnection, initDB } = require('./db/mysql');
+// 引入 JSON 数据库连接和初始化脚本
+const { query, testConnection, initDB } = require('./db/jsondb');
+// 引入本地算法，替代AI功能
+const { classifyVideoByKeywords, getAnswerByKeywords, recommendVideos } = require('./db/localAlgorithms');
 
 const app = express();
 const port = 3001;
@@ -15,7 +17,7 @@ const port = 3001;
 // 数据文件路径和初始化
 const dataDir = path.join(__dirname, 'data');
 const feedbackFile = path.join(dataDir, 'feedback.json');
-const watchFile = path.join(dataDir, 'watch.json');
+const watchHistoryFile = path.join(dataDir, 'watch_history.json');
 const videoDataFile = path.join(dataDir, 'videos.json');
 // 确保 data 目录存在
 if (!fs.existsSync(dataDir)) {
@@ -23,7 +25,7 @@ if (!fs.existsSync(dataDir)) {
 }
 // 确保 JSON 文件存在
 if (!fs.existsSync(feedbackFile)) fs.writeFileSync(feedbackFile, '[]');
-if (!fs.existsSync(watchFile)) fs.writeFileSync(watchFile, '[]');
+if (!fs.existsSync(watchHistoryFile)) fs.writeFileSync(watchHistoryFile, '[]');
 if (!fs.existsSync(videoDataFile)) fs.writeFileSync(videoDataFile, '{}');
 // 加载视频分类数据
 let videoCategories = {};
@@ -70,13 +72,13 @@ app.post('/register', async (req, res) => {
       return res.status(400).json({ success: false, message: '用户名和密码不能为空' });
     }
     // 检查是否存在用户名
-    const existing = await query('SELECT id FROM users WHERE username = ?', [username]);
+    const existing = await query('select users', { username });
     if (existing.length > 0) {
       return res.status(400).json({ success: false, message: '用户名已存在' });
     }
     // 加密并插入数据库
     const hashed = bcrypt.hashSync(password, 10);
-    await query('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashed]);
+    await query('insert users', { username, password: hashed, role: 'user' });
     res.json({ success: true, message: '注册成功' });
   } catch (error) {
     console.error('注册失败:', error);
@@ -91,7 +93,7 @@ app.post('/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ success: false, message: '用户名和密码不能为空' });
     }
-    const rows = await query('SELECT id, username, password, role FROM users WHERE username = ?', [username]);
+    const rows = await query('select users', { username });
     if (rows.length === 0) {
       return res.status(401).json({ success: false, message: '用户名或密码错误' });
     }
@@ -166,28 +168,8 @@ const upload = multer({ storage: storage });
 // 通用分类函数
 async function classifyVideo(title) {
   try {
-    const response = await axios.post('https://www.gpt4oapi.com/v1/chat/completions', {
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: `你是一个视频分类助手。只能从以下四个标签中选择一个：语文、数学、英语、其他。
-看到任何英文单词就选"英语"。以下是示例：
-示例1: 视频标题是:"i love china"，分类:"英语"
-示例2: 视频标题是:"朝花夕拾"，分类:"语文"
-示例3: 视频标题是:"数学函数基础"，分类:"数学"
-只返回标签，不要其他文字。` },
-        { role: 'user', content: `视频标题是:"${title}"，请选择一个分类标签。` }
-      ],
-      temperature: 0.1,
-      max_tokens: 20
-    }, {
-      headers: {
-        'Authorization': `Bearer sk-1WRKZt7A1YNYP4Y3ZP4KFeNNQ88j0ZoeUarpHnnzz8f9wa3N`,
-        'Content-Type': 'application/json'
-      }
-    });
-    const category = response.data.choices[0].message.content.trim();
-    const validCategories = ['语文', '数学', '英语', '其他'];
-    return validCategories.includes(category) ? category : '其他';
+    console.log('使用本地算法分类视频:', title);
+    return classifyVideoByKeywords(title);
   } catch (error) {
     console.error('分类错误:', error);
     return '其他';
@@ -207,7 +189,6 @@ app.post('/upload', upload.single('video'), async (req, res) => {
 
   // 使用相对路径，去掉 uploads/ 前缀
   const videoPath = req.file.path.replace('uploads/', '');
-  const fullPath = req.file.path;
 
   try {
     console.log('准备调用 GPT API，视频标题:', videoTitle);
@@ -215,13 +196,12 @@ app.post('/upload', upload.single('video'), async (req, res) => {
     // 使用通用分类函数
     const finalCategory = await classifyVideo(videoTitle);
 
-    // 保存视频路径和分类标签
-    videoCategories[fullPath] = {
+    // 保存视频信息到数据库
+    const videoResult = await query('insert videos', {
+      path: videoPath,
       title: videoTitle,
       category: finalCategory
-    };
-    // 持久化更新到文件
-    fs.writeFileSync(videoDataFile, JSON.stringify(videoCategories, null, 2));
+    });
 
     // 返回结果给前端
     res.json({
@@ -229,125 +209,153 @@ app.post('/upload', upload.single('video'), async (req, res) => {
       message: '视频上传成功',
       title: videoTitle,
       videoPath: `uploads/${videoPath}`,
-      category: finalCategory,
-      // originalResponse 可根据需要删除
+      category: finalCategory
     });
   } catch (error) {
     console.error('上传或分类失败:', error.response ? error.response.data : error.message);
+    // 删除已上传的文件
+    fs.unlink(req.file.path, () => {});
     res.status(500).send('上传或分类失败');
   }
 });
 
-// 批量上传视频并自动分类
+// 批量上传视频并支持手动分类
 app.post('/uploadBatch', upload.array('videos'), async (req, res) => {
   const files = req.files;
+  const selectedCategory = req.body.category; // 获取手动选择的分类
+  
   if (!files || files.length === 0) {
     return res.status(400).json({ success: false, message: '未上传文件' });
   }
-  const videoPaths = [];
-  const titles = [];
-  const categoriesArr = [];
-  for (const file of files) {
-    // 对原始文件名进行 latin1→utf8 解码，处理中文乱码
-    const rawNameBatch = file.originalname;
-    const decodedBatchName = Buffer.from(rawNameBatch, 'latin1').toString('utf8');
-    const batchTitle = path.basename(decodedBatchName, path.extname(decodedBatchName)) || '未命名视频';
-    const category = await classifyVideo(batchTitle);
-    videoCategories[file.path] = { title: batchTitle, category: category };
-    videoPaths.push(file.path);
-    titles.push(batchTitle);
-    categoriesArr.push(category);
+
+  try {
+    const results = await Promise.all(files.map(async (file) => {
+      const rawNameBatch = file.originalname;
+      const decodedBatchName = Buffer.from(rawNameBatch, 'latin1').toString('utf8');
+      const batchTitle = path.basename(decodedBatchName, path.extname(decodedBatchName)) || '未命名视频';
+      
+      // 使用手动选择的分类，如果没有则自动分类
+      const category = selectedCategory || await classifyVideo(batchTitle);
+      
+      // 使用相对路径，去掉 uploads/ 前缀
+      const videoPath = path.basename(file.path);
+      
+      const videoResult = await query('insert videos', {
+        path: videoPath,
+        title: batchTitle,
+        category: category
+      });
+
+      return {
+        path: videoPath,
+        title: batchTitle,
+        category: category
+      };
+    }));
+
+    res.json({
+      success: true,
+      videos: results
+    });
+  } catch (error) {
+    console.error('批量上传失败:', error);
+    // 删除已上传的文件
+    files.forEach(file => fs.unlink(file.path, () => {}));
+    res.status(500).json({ success: false, message: '批量上传失败' });
   }
-  // 持久化更新到文件
-  fs.writeFileSync(videoDataFile, JSON.stringify(videoCategories, null, 2));
-  res.json({ success: true, videoPaths, titles, categories: categoriesArr });
 });
 
 // 获取视频分类
-app.get('/category/:videoPath', (req, res) => {
-  const videoPath = req.params.videoPath;
-  const category = videoCategories[videoPath];
-  if (category) {
-    res.json({ category: category });
-  } else {
-    res.status(404).send('未找到分类');
+app.get('/category/:videoPath', async (req, res) => {
+  try {
+    const videoPath = req.params.videoPath;
+    const videos = await query('select videos', { path: videoPath });
+    if (videos.length > 0) {
+      res.json({ category: videos[0].category });
+    } else {
+      res.status(404).send('未找到分类');
+    }
+  } catch (error) {
+    console.error('获取分类失败:', error);
+    res.status(500).send('获取分类失败');
   }
 });
 
 // 获取所有视频及其分类
-app.get('/videos', (req, res) => {
-  console.log('GET /videos videoCategories:', videoCategories);
-  const videos = Object.entries(videoCategories).map(([videoPath, info]) => {
-    let title, category;
-    // 兼容旧版本仅存储分类字符串的情况
-    if (info && typeof info === 'object') {
-      title = info.title || '未命名视频';
-      category = info.category;
-    } else {
-      title = '未命名视频';
-      category = info;
-    }
-    // 从文件名中解析上传时间戳
-    const uploadTime = Number(path.basename(videoPath, path.extname(videoPath)));
-    return { path: videoPath, title, category, uploadTime };
-  });
-  res.json(videos);
-});
-
-// 删除视频接口，基于查询参数 path
-app.delete('/video', (req, res) => {
-  const videoPath = req.query.path;
-  // 检查视频是否存在
-  if (!videoPath || !videoCategories[videoPath]) {
-    return res.status(404).send('未找到视频');
+app.get('/videos', async (req, res) => {
+  try {
+    const videos = await query('select videos');
+    const formattedVideos = videos.map(video => ({
+      path: video.path,
+      title: video.title || '未命名视频',
+      category: video.category,
+      uploadTime: new Date(video.upload_time).getTime()
+    }));
+    res.json(formattedVideos);
+  } catch (error) {
+    console.error('获取视频列表失败:', error);
+    res.status(500).send('获取视频列表失败');
   }
-  // 删除文件
-  const filePath = path.join(__dirname, videoPath);
-  fs.unlink(filePath, (err) => {
-    if (err) {
-      console.error('删除文件失败:', err);
-      return res.status(500).send('删除文件失败');
-    }
-
-    // 删除存储的信息
-    delete videoCategories[videoPath];
-    // 持久化更新到文件
-    fs.writeFileSync(videoDataFile, JSON.stringify(videoCategories, null, 2));
-    res.json({ success: true, message: '视频删除成功' });
-  });
 });
 
-// AI 对话接口
+// 删除视频接口
+app.delete('/video', async (req, res) => {
+  const videoPath = req.query.path;
+  try {
+    console.log('删除视频请求:', videoPath);
+    
+    const result = await query('delete videos', { path: videoPath });
+    console.log('删除数据库结果:', result);
+    
+    if (!result || result.length === 0) {
+      return res.status(404).send('未找到视频');
+    }
+
+    // 删除文件
+    const filePath = path.join(uploadDir, path.basename(videoPath));
+    console.log('删除文件路径:', filePath);
+    
+    try {
+      await fs.promises.unlink(filePath);
+      console.log('文件删除成功');
+    } catch (fileError) {
+      console.error('文件删除失败:', fileError);
+      // 文件删除失败不影响整体结果
+    }
+    
+    res.json({ success: true, message: '视频删除成功' });
+  } catch (error) {
+    console.error('删除视频失败:', error);
+    res.status(500).send('删除视频失败');
+  }
+});
+
+// AI 对话接口改为本地问答系统
 app.post('/chat', async (req, res) => {
   const message = req.body.message;
   if (!message) {
     return res.status(400).json({ error: '消息不能为空' });
   }
+  
   // 初始化会话历史
   if (!req.session.chatHistory) {
-    req.session.chatHistory = [{ role: 'system', content: '你是一个友好的 AI 助手，请回答用户的问题。' }];
+    req.session.chatHistory = [];
   }
+  
   // 添加用户消息
   req.session.chatHistory.push({ role: 'user', content: message });
+  
   try {
-    const response = await axios.post('https://www.gpt4oapi.com/v1/chat/completions', {
-      model: 'gpt-3.5-turbo',
-      messages: req.session.chatHistory,
-      temperature: 0.7,
-      max_tokens: 500
-    }, {
-      headers: {
-        'Authorization': 'Bearer sk-1WRKZt7A1YNYP4Y3ZP4KFeNNQ88j0ZoeUarpHnnzz8f9wa3N',
-        'Content-Type': 'application/json'
-      }
-    });
-    const aiMessage = response.data.choices[0].message.content.trim();
-    // 添加 AI 回复到历史
-    req.session.chatHistory.push({ role: 'assistant', content: aiMessage });
-    res.json({ message: aiMessage });
+    // 使用本地问答系统
+    const answer = getAnswerByKeywords(message);
+    
+    // 添加回复到历史
+    req.session.chatHistory.push({ role: 'assistant', content: answer });
+    
+    res.json({ message: answer });
   } catch (error) {
-    console.error('AI 对话错误:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'AI 对话失败' });
+    console.error('对话错误:', error);
+    res.status(500).json({ error: '对话失败' });
   }
 });
 
@@ -366,148 +374,196 @@ app.get('/chat/history', (req, res) => {
 });
 
 // 用户反馈：提交反馈
-app.post('/feedback', (req, res) => {
+app.post('/feedback', async (req, res) => {
   const user = req.session.user;
   const { content } = req.body;
   if (!user) return res.status(401).json({ success: false, message: '未登录' });
   if (!content || typeof content !== 'string') return res.status(400).json({ success: false, message: '反馈内容不能为空' });
-  const feedbacks = JSON.parse(fs.readFileSync(feedbackFile, 'utf8'));
-  const item = { username: user.username, content, timestamp: Date.now() };
-  feedbacks.push(item);
-  fs.writeFileSync(feedbackFile, JSON.stringify(feedbacks, null, 2));
-  res.json({ success: true });
+  
+  try {
+    await query('insert feedback', { user_id: user.id, content });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('提交反馈失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
 });
 
 // 用户反馈：获取当前用户历史反馈
-app.get('/feedback', (req, res) => {
+app.get('/feedback', async (req, res) => {
   const user = req.session.user;
   if (!user) return res.status(401).json({ success: false, message: '未登录' });
-  const feedbacks = JSON.parse(fs.readFileSync(feedbackFile, 'utf8'));
-  const userList = feedbacks.filter(f => f.username === user.username).sort((a, b) => b.timestamp - a.timestamp);
-  res.json(userList);
+  
+  try {
+    const feedbacks = await query('select feedback', { user_id: user.id });
+    res.json(feedbacks.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+  } catch (error) {
+    console.error('获取反馈失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
 });
 
 // ----- 学习数据模块 -----
 // 记录用户观看历史
-app.post('/watch-history', (req, res) => {
+app.post('/watch-history', async (req, res) => {
   const user = req.session.user;
   if (!user) return res.status(401).json({ success: false, message: '未登录' });
-  // 支持 completed（boolean）和 progress（0~1 数值）
+  
   const { videoPath, completed, progress } = req.body;
   if (!videoPath || typeof completed !== 'boolean' || (progress !== undefined && typeof progress !== 'number')) {
     return res.status(400).json({ success: false, message: '参数错误' });
   }
-  const records = JSON.parse(fs.readFileSync(watchFile, 'utf8'));
-  const record = { username: user.username, videoPath, completed, timestamp: Date.now() };
-  if (typeof progress === 'number') record.progress = progress;
-  records.push(record);
-  fs.writeFileSync(watchFile, JSON.stringify(records, null, 2));
-  res.json({ success: true });
+
+  try {
+    await query('insert watch_history', {
+      user_id: user.id,
+      video_path: videoPath,
+      completed,
+      progress: progress || 0
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('记录观看历史失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
 });
 
-// 获取学习进度报告，统计每个视频点击次数和最高播放进度
-app.get('/report/progress', (req, res) => {
+// 获取学习进度报告
+app.get('/report/progress', async (req, res) => {
   const user = req.session.user;
   if (!user) return res.status(401).json({ success: false, message: '未登录' });
-  const username = user.username;
-  const allRecords = JSON.parse(fs.readFileSync(watchFile, 'utf8'));
-  const userRecords = allRecords.filter(r => r.username === username);
-  // 按视频聚合记录
-  const map = {};
-  userRecords.forEach(r => {
-    if (!map[r.videoPath]) map[r.videoPath] = [];
-    map[r.videoPath].push(r);
-  });
-  // 仅统计有记录的视频，并包含标题
-  const details = Object.entries(map).map(([videoPath, recs]) => {
-    // 获取视频标题
-    const title = (videoCategories[videoPath] && videoCategories[videoPath].title) || path.basename(videoPath);
-    // 点击次数：仅统计未完播且未上报progress的记录（play事件）
-    const clickCount = recs.filter(r => r.completed === false && r.progress === undefined).length;
-    const highestProgress = recs.some(r => r.completed)
-      ? 1
-      : recs.reduce((max, r) => {
-        return Math.max(max, typeof r.progress === 'number' ? r.progress : 0);
-      }, 0);
-    const lastTimestamp = recs.length > 0
-      ? recs.reduce((max, r) => r.timestamp > max ? r.timestamp : max, recs[0].timestamp)
-      : null;
-    return { videoPath, title, clickCount, highestProgress, timestamp: lastTimestamp };
-  });
-  res.json({ success: true, report: { details } });
+
+  try {
+    const history = await query('select watch_history', { user_id: user.id });
+    const videos = await query('select videos');
+
+    // 按视频聚合记录
+    const progressMap = {};
+    history.forEach(record => {
+      if (!progressMap[record.video_path]) {
+        progressMap[record.video_path] = {
+          clickCount: 0,
+          highestProgress: 0,
+          lastTimestamp: null
+        };
+      }
+      const stats = progressMap[record.video_path];
+      
+      if (!record.completed && !record.progress) {
+        stats.clickCount++;
+      }
+      if (record.completed) {
+        stats.highestProgress = 1;
+      } else if (record.progress > stats.highestProgress) {
+        stats.highestProgress = record.progress;
+      }
+      const timestamp = new Date(record.timestamp).getTime();
+      if (!stats.lastTimestamp || timestamp > stats.lastTimestamp) {
+        stats.lastTimestamp = timestamp;
+      }
+    });
+
+    // 生成报告
+    const details = Object.entries(progressMap).map(([videoPath, stats]) => {
+      const video = videos.find(v => v.path === videoPath);
+      return {
+        videoPath,
+        title: video ? video.title : path.basename(videoPath),
+        clickCount: stats.clickCount,
+        highestProgress: stats.highestProgress,
+        timestamp: stats.lastTimestamp
+      };
+    });
+
+    res.json({ success: true, report: { details } });
+  } catch (error) {
+    console.error('获取学习进度报告失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
 });
 
 // 新增：初始化学习记录（清空所有记录）
-app.delete('/watch-history', (req, res) => {
-  const user = req.session.user;
-  if (!user) return res.status(401).json({ success: false, message: '未登录' });
-  // 清空学习记录文件
-  fs.writeFileSync(watchFile, '[]');
-  res.json({ success: true });
+app.delete('/watch-history', async (req, res) => {
+  try {
+    const user = req.session.user;
+    if (!user) return res.status(401).json({ success: false, message: '未登录' });
+    
+    console.log('清空学习记录');
+    
+    // 使用 JSON 数据库清空学习记录
+    // 方法1: 从数据库中删除记录
+    const { query } = require('./db/jsondb');
+    
+    // 方法2: 直接写入空数组
+    await fs.promises.writeFile(watchHistoryFile, '[]');
+    
+    console.log('学习记录已清空');
+    res.json({ success: true, message: '学习记录已清空' });
+  } catch (error) {
+    console.error('清空学习记录失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
 });
 
-// 视频推荐接口
+// 视频推荐接口 (使用本地算法)
 app.get('/recommendation', async (req, res) => {
-  const user = req.session.user;
-  if (!user) return res.status(401).json({ success: false, message: '未登录' });
-  // 汇总数据
-  const watchData = JSON.parse(fs.readFileSync(watchFile, 'utf8')).filter(r => r.username === user);
-  const videos = Object.entries(videoCategories).map(([path, info]) => ({ videoPath: path, title: info.title }));
-  const historyText = watchData.map(r => `${r.videoPath}，已看完：${r.completed}`).join('\n') || '无观看记录';
-  const videoText = videos.map(v => v.title).join('\n');
   try {
-    // 计算学习进度统计
-    const allRecords = JSON.parse(fs.readFileSync(watchFile, 'utf8')).filter(r => r.username === user);
-    const progressMap = {};
-    allRecords.forEach(r => { if (!progressMap[r.videoPath]) progressMap[r.videoPath] = []; progressMap[r.videoPath].push(r); });
-    const progressDetails = Object.entries(progressMap).map(([videoPath, recs]) => {
-      const title = (videoCategories[videoPath] && videoCategories[videoPath].title) || path.basename(videoPath);
-      const clickCount = recs.filter(r => r.completed === false && r.progress === undefined).length;
-      const highestProgress = recs.some(r => r.completed)
-        ? 1
-        : recs.reduce((max, r) => Math.max(max, typeof r.progress === 'number' ? r.progress : 0), 0);
-      return `视频标题: ${title}，点击次数: ${clickCount}，最高进度: ${(highestProgress*100).toFixed(2)}%`;
-    });
-    const progressText = progressDetails.length > 0 ? progressDetails.join('\n') : '无学习记录';
-    const aiRes = await axios.post('https://www.gpt4oapi.com/v1/chat/completions', {
-      model: 'gpt-3.5-turbo',
-      messages: [
-        { role: 'system', content: '你是一个视频推荐系统，根据用户的学习进度和可选视频列表推荐下一个视频。只返回视频标题。' },
-        { role: 'user', content: `用户：${user}\n学习进度：\n${progressText}\n可选视频：\n${videoText}\n请选择一个最合适的视频。` }
-      ],
-      temperature: 0.2,
-      max_tokens: 50
-    }, {
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || 'sk-1WRKZt7A1YNYP4Y3ZP4KFeNNQ88j0ZoeUarpHnnzz8f9wa3N'}`,
-        'Content-Type': 'application/json'
+    const user = req.session.user;
+    if (!user) return res.status(401).json({ success: false, message: '未登录' });
+    
+    console.log('获取视频推荐，用户:', user.username);
+    
+    // 获取观看历史
+    const watchHistory = await query('select watch_history', { user_id: user.id });
+    console.log('观看历史记录数:', watchHistory.length);
+    
+    // 获取视频列表
+    const videos = await query('select videos');
+    console.log('视频总数:', videos.length);
+    
+    if (videos.length === 0) {
+      return res.json({ 
+        success: true, 
+        recommendation: null,
+        message: '暂无可推荐视频'
+      });
+    }
+    
+    // 使用本地推荐算法
+    const recommendation = recommendVideos(user.id, watchHistory, videos);
+    
+    if (!recommendation) {
+      return res.json({
+        success: true,
+        recommendation: null,
+        message: '没有合适的推荐视频'
+      });
+    }
+    
+    console.log('推荐视频:', recommendation.title);
+    
+    res.json({ 
+      success: true, 
+      recommendation: {
+        videoPath: `/uploads/${recommendation.path}`,
+        title: recommendation.title
       }
     });
-    const recTitle = aiRes.data.choices[0].message.content.trim();
-    // 精确匹配
-    let recVideo = videos.find(v => v.title === recTitle);
-    // 尝试模糊匹配
-    if (!recVideo) {
-      recVideo = videos.find(v => recTitle.includes(v.title) || v.title.includes(recTitle));
-    }
-    if (recVideo) {
-      res.json({ success: true, recommendation: recVideo });
-    } else {
-      // 后备随机推荐
-      const fallback = videos[Math.floor(Math.random() * videos.length)];
-      res.json({ success: true, recommendation: fallback, note: '未能精确匹配AI返回，已随机推荐' });
-    }
   } catch (error) {
-    console.error('推荐系统错误：', error);
+    console.error('视频推荐失败:', error);
     res.status(500).json({ success: false, message: '推荐失败' });
   }
 });
 
-// MySQL 后台用户管理接口
+// MySQL 后台用户管理接口改为JSON存储
 app.get('/admin/users', adminOnly, async (req, res) => {
   try {
-    const users = await query('SELECT username, role, created_at AS createdAt FROM users');
-    res.json(users);
+    const users = await query('select users');
+    res.json(users.map(user => ({
+      username: user.username,
+      role: user.role,
+      createdAt: user.created_at
+    })));
   } catch (error) {
     console.error('获取用户列表失败:', error);
     res.status(500).json({ success: false, message: '获取用户列表失败' });
@@ -521,8 +577,8 @@ app.put('/admin/user/:username/role', adminOnly, async (req, res) => {
     return res.status(400).json({ success: false, message: '无效角色' });
   }
   try {
-    const result = await query('UPDATE users SET role = ? WHERE username = ?', [role, usernameParam]);
-    if (result.affectedRows === 0) {
+    const result = await query('update users', { username: usernameParam, role });
+    if (!result || result.length === 0) {
       return res.status(404).json({ success: false, message: '用户不存在' });
     }
     res.json({ success: true });
@@ -535,8 +591,8 @@ app.put('/admin/user/:username/role', adminOnly, async (req, res) => {
 app.delete('/admin/user/:username', adminOnly, async (req, res) => {
   const usernameParam = req.params.username;
   try {
-    const result = await query('DELETE FROM users WHERE username = ?', [usernameParam]);
-    if (result.affectedRows === 0) {
+    const result = await query('delete users', { username: usernameParam });
+    if (!result || result.length === 0) {
       return res.status(404).json({ success: false, message: '用户不存在' });
     }
     res.json({ success: true });
@@ -562,6 +618,154 @@ app.get('/admin/feedback', adminOnly, (req, res) => {
   const feedbacks = JSON.parse(fs.readFileSync(feedbackFile, 'utf8'));
   feedbacks.sort((a, b) => b.timestamp - a.timestamp);
   res.json(feedbacks);
+});
+
+// 修改视频分类
+app.put('/video/:videoPath/category', async (req, res) => {
+  try {
+    const { videoPath } = req.params;
+    const { category } = req.body;
+    console.log('修改视频分类:', videoPath, category);
+    
+    // 验证分类
+    const validCategories = ['语文', '数学', '英语', '其他'];
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({ success: false, message: '无效的分类' });
+    }
+    
+    // 获取当前视频
+    const videos = await query('select videos', { path: videoPath });
+    if (videos.length === 0) {
+      return res.status(404).json({ success: false, message: '视频不存在' });
+    }
+    
+    // 读取视频对象
+    const videosObj = JSON.parse(fs.readFileSync(videoDataFile, 'utf8'));
+    
+    // 更新分类
+    if (videosObj[videoPath]) {
+      videosObj[videoPath].category = category;
+      fs.writeFileSync(videoDataFile, JSON.stringify(videosObj, null, 2));
+      res.json({ success: true, message: '分类更新成功' });
+    } else {
+      res.status(404).json({ success: false, message: '视频不存在' });
+    }
+  } catch (error) {
+    console.error('更新分类失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+// 获取所有分类
+app.get('/admin/categories', adminOnly, async (req, res) => {
+  try {
+    // 从配置文件读取分类
+    const categoriesConfig = JSON.parse(fs.readFileSync(path.join(dataDir, 'categories.json'), 'utf8'));
+    res.json({ success: true, categories: categoriesConfig.categories });
+  } catch (error) {
+    // 如果文件不存在，返回默认分类
+    const defaultCategories = ['语文', '数学', '英语', '其他'];
+    // 创建默认配置文件
+    fs.writeFileSync(
+      path.join(dataDir, 'categories.json'), 
+      JSON.stringify({ categories: defaultCategories }, null, 2)
+    );
+    res.json({ success: true, categories: defaultCategories });
+  }
+});
+
+// 更新分类列表
+app.put('/admin/categories', adminOnly, async (req, res) => {
+  try {
+    const { categories } = req.body;
+    
+    // 验证新分类列表
+    if (!Array.isArray(categories) || categories.length === 0) {
+      return res.status(400).json({ success: false, message: '分类列表格式错误' });
+    }
+    
+    // 确保包含"其他"分类
+    if (!categories.includes('其他')) {
+      categories.push('其他');
+    }
+    
+    // 保存新的分类列表
+    fs.writeFileSync(
+      path.join(dataDir, 'categories.json'),
+      JSON.stringify({ categories }, null, 2)
+    );
+    
+    res.json({ success: true, message: '分类更新成功' });
+  } catch (error) {
+    console.error('更新分类失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+// 获取分类统计信息
+app.get('/admin/categories/stats', adminOnly, async (req, res) => {
+  try {
+    const videos = await query('select videos');
+    const stats = {};
+    videos.forEach(video => {
+      if (!stats[video.category]) {
+        stats[video.category] = 0;
+      }
+      stats[video.category]++;
+    });
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error('获取分类统计失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+// 批量更新视频分类
+app.put('/admin/categories/batch', adminOnly, async (req, res) => {
+  try {
+    const { oldCategory, newCategory } = req.body;
+    const validCategories = ['语文', '数学', '英语', '其他'];
+    
+    if (!validCategories.includes(newCategory)) {
+      return res.status(400).json({ success: false, message: '无效的分类' });
+    }
+
+    const videos = await query('select videos');
+    let updateCount = 0;
+    
+    for (const video of videos) {
+      if (video.category === oldCategory) {
+        const videoPath = video.path;
+        const videosObj = JSON.parse(fs.readFileSync(videoDataFile, 'utf8'));
+        if (videosObj[videoPath]) {
+          videosObj[videoPath].category = newCategory;
+          updateCount++;
+        }
+        await fs.promises.writeFile(videoDataFile, JSON.stringify(videosObj, null, 2));
+      }
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `成功更新 ${updateCount} 个视频的分类` 
+    });
+  } catch (error) {
+    console.error('批量更新分类失败:', error);
+    res.status(500).json({ success: false, message: '服务器错误' });
+  }
+});
+
+// 公共接口：获取所有分类
+app.get('/categories', async (req, res) => {
+  try {
+    // 从配置文件读取分类
+    const categoriesConfig = JSON.parse(fs.readFileSync(path.join(dataDir, 'categories.json'), 'utf8'));
+    res.json({ success: true, categories: categoriesConfig.categories });
+  } catch (error) {
+    // 如果文件不存在，返回默认分类
+    const defaultCategories = ['语文', '数学', '英语', '其他'];
+    res.json({ success: true, categories: defaultCategories });
+  }
 });
 
 // 启动服务器

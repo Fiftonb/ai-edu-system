@@ -27,7 +27,7 @@
 
 /* 全局主体样式 */
 body {
-  font-family: 'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background-color: var(--background-color);
   color: var(--text-color);
   line-height: 1.6;
@@ -357,4 +357,375 @@ footer {
   text-align: center;
   color: var(--accent-color);
   margin: 5px 0;
+}
+
+/* 视频缩略图容器 */
+.video-thumbnail {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 宽高比 */
+  background: #000;
+  overflow: hidden;
+}
+
+.video-thumbnail video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* 保持视频比例，可能会有黑边 */
+}
+
+/* 视频信息区域 */
+.video-info {
+  padding: 12px;
+}
+
+.video-title {
+  font-weight: bold;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.video-meta {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.upload-time {
+  margin-left: auto;
+}
+
+.video-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* 分类过滤按钮 */
+.category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+/* 反馈样式 */
+.feedback-item {
+  border-left: 3px solid #3498db;
+  padding: 10px;
+  margin-bottom: 10px;
+  background-color: #f9f9f9;
+}
+
+.feedback-info {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 5px;
+}
+
+/* 学习进度样式 */
+.progress-container {
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  padding: 15px;
+}
+
+.progress-list {
+  list-style: none;
+  padding: 0;
+}
+
+.progress-list li {
+  border-bottom: 1px solid #eee;
+  padding: 10px 0;
+}
+
+.progress-title {
+  font-weight: bold;
+}
+
+.progress-info {
+  font-size: 14px;
+  margin: 5px 0;
+}
+
+.progress-date {
+  font-size: 12px;
+  color: #666;
+}
+
+/* 管理控制区域 */
+.admin-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .video-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .video-container {
+    grid-template-columns: 1fr;
+  }
+  
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  #userInfo {
+    margin-top: 10px;
+  }
+  
+  .admin-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .admin-controls button {
+    margin-top: 10px;
+  }
+}
+
+/* 智能推荐样式 */
+#recommendResult {
+  min-height: 100px;
+}
+
+#recommendResult .video-item {
+  max-width: 600px;
+  margin: 0 auto;
+  border: 1px solid rgba(52, 152, 219, 0.2);
+}
+
+.recommended-badge {
+  background-color: rgba(52, 152, 219, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+  color: var(--primary-color);
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.no-recommendation {
+  text-align: center;
+  padding: 30px;
+  background-color: #f9f9f9;
+  border-radius: var(--border-radius);
+  color: var(--text-light);
+}
+
+/* 为推荐视频添加特殊效果 */
+#recommendResult .video-thumbnail::after {
+  content: "推荐";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: var(--primary-color);
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* 分类管理样式 */
+.category-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin: 15px 0;
+}
+
+.stat-item {
+  background: #f8f9fa;
+  border-radius: var(--border-radius);
+  padding: 15px;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.stat-label {
+  font-weight: bold;
+  margin-bottom: 8px;
+  color: var(--primary-color);
+}
+
+.stat-value {
+  font-size: 1.2em;
+  color: var(--text-color);
+}
+
+.category-actions {
+  background: #f8f9fa;
+  border-radius: var(--border-radius);
+  padding: 15px;
+}
+
+.category-actions h3 {
+  margin: 0 0 15px 0;
+  color: var(--text-color);
+}
+
+.form-control {
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-size: 14px;
+  min-width: 120px;
+}
+
+/* 分类管理样式 */
+.category-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  margin-bottom: 8px;
+}
+
+.category-item:hover {
+  background: #f8f9fa;
+}
+
+.category-item .delete-category {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.category-item span {
+  font-weight: 500;
+}
+
+#newCategory {
+  margin-bottom: 0;
+}
+
+/* 上传分类选择样式 */
+.upload-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.category-option {
+  background: #f8f9fa;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 8px 15px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.category-option:hover {
+  background: #e9ecef;
+}
+
+.category-option input[type="radio"] {
+  margin-right: 8px;
+}
+
+.category-option label {
+  cursor: pointer;
+  user-select: none;
+}
+
+.category-option input[type="radio"]:checked + label {
+  color: var(--primary-color);
+  font-weight: 500;
+}
+
+/* 上传表单组样式优化 */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.form-group .form-text {
+  color: #6c757d;
+  font-size: 0.875rem;
+  margin-top: 5px;
+}
+
+/* 上传预览样式 */
+.upload-preview {
+  margin-bottom: 20px;
+}
+
+.upload-preview h3 {
+  margin-bottom: 15px;
+  color: var(--text-color);
+}
+
+.preview-container {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.preview-container .video-item {
+  border: 2px dashed var(--border-color);
+  transition: var(--transition);
+}
+
+.preview-container .video-item:hover {
+  border-color: var(--primary-color);
+}
+
+.preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  background: #f8f9fa;
+  color: var(--text-light);
+  text-align: center;
+}
+
+.preview-placeholder i {
+  font-size: 48px;
+  margin-bottom: 10px;
+  color: var(--primary-color);
+}
+
+.preview-placeholder p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.upload-grid {
+  display: grid;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+@media (min-width: 768px) {
+  .upload-grid {
+    grid-template-columns: 2fr 1fr;
+  }
 } 

@@ -42,6 +42,39 @@
       <div id="feedbackList"></div>
     </div>
 
+    <!-- 分类管理模块 -->
+    <div class="card">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">分类管理</h2>
+      </div>
+      <div id="categoryStats"></div>
+      <div class="category-actions" style="margin-top: 20px;">
+        <h3>分类管理</h3>
+        <div id="categoryList" style="margin-bottom: 15px;">
+          <!-- 分类列表将通过 JavaScript 动态添加 -->
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="newCategory" class="form-control" placeholder="输入新分类名称">
+          <button id="addCategory" class="btn btn-primary">添加分类</button>
+        </div>
+        <p style="margin-top: 10px; font-size: 12px; color: #666;">
+          注意："其他"分类为系统保留分类，不可删除
+        </p>
+        <div style="margin-top: 20px;">
+          <h3>批量修改分类</h3>
+          <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <select id="oldCategory" class="form-control">
+              <option value="">选择原分类</option>
+            </select>
+            <select id="newCategory" class="form-control">
+              <option value="">选择新分类</option>
+            </select>
+            <button id="updateCategories" class="btn btn-primary">批量更新</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <footer>
       &copy; 2025 视频学习平台 - 管理后台
     </footer>
@@ -196,6 +229,197 @@
       }
     }
     loadAdminFeedback();
+
+    // 加载分类统计信息
+    async function loadCategoryStats() {
+      try {
+        const [categoriesRes, statsRes] = await Promise.all([
+          fetch('/admin/categories', { credentials: 'same-origin' }),
+          fetch('/admin/categories/stats', { credentials: 'same-origin' })
+        ]);
+
+        if (!categoriesRes.ok || !statsRes.ok) {
+          throw new Error('获取分类信息失败');
+        }
+
+        const { categories } = await categoriesRes.json();
+        const { stats } = await statsRes.json();
+
+        // 更新分类选择框
+        const oldCategorySelect = document.getElementById('oldCategory');
+        const newCategorySelect = document.getElementById('newCategory');
+        oldCategorySelect.innerHTML = '<option value="">选择原分类</option>';
+        newCategorySelect.innerHTML = '<option value="">选择新分类</option>';
+        
+        categories.forEach(category => {
+          oldCategorySelect.innerHTML += `<option value="${category}">${category}</option>`;
+          newCategorySelect.innerHTML += `<option value="${category}">${category}</option>`;
+        });
+
+        // 显示统计信息
+        const statsContainer = document.getElementById('categoryStats');
+        let statsHtml = '<div class="category-stats">';
+        categories.forEach(category => {
+          const count = stats[category] || 0;
+          statsHtml += `
+            <div class="stat-item">
+              <div class="stat-label">${category}</div>
+              <div class="stat-value">${count} 个视频</div>
+            </div>
+          `;
+        });
+        statsHtml += '</div>';
+        statsContainer.innerHTML = statsHtml;
+
+        // 更新分类列表
+        const categoryList = document.getElementById('categoryList');
+        categoryList.innerHTML = '';
+        categories.forEach(category => {
+          const categoryItem = document.createElement('div');
+          categoryItem.className = 'category-item';
+          categoryItem.innerHTML = `
+            <span>${category}</span>
+            ${category !== '其他' ? `
+              <button class="btn btn-accent delete-category" data-category="${category}">
+                删除
+              </button>
+            ` : ''}
+          `;
+          categoryList.appendChild(categoryItem);
+        });
+
+        // 绑定删除分类事件
+        document.querySelectorAll('.delete-category').forEach(btn => {
+          btn.onclick = async () => {
+            const categoryToDelete = btn.dataset.category;
+            if (!confirm(`确定要删除"${categoryToDelete}"分类吗？相关视频将被移到"其他"分类。`)) {
+              return;
+            }
+
+            try {
+              // 先将该分类的视频转移到"其他"分类
+              const moveRes = await fetch('/admin/categories/batch', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ oldCategory: categoryToDelete, newCategory: '其他' })
+              });
+
+              if (!moveRes.ok) {
+                throw new Error('转移视频失败');
+              }
+
+              // 然后更新分类列表
+              const newCategories = categories.filter(c => c !== categoryToDelete);
+              const updateRes = await fetch('/admin/categories', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ categories: newCategories })
+              });
+
+              if (!updateRes.ok) {
+                throw new Error('更新分类列表失败');
+              }
+
+              alert('分类删除成功');
+              loadCategoryStats();
+            } catch (error) {
+              console.error('删除分类失败:', error);
+              alert('删除分类失败');
+            }
+          };
+        });
+      } catch (error) {
+        console.error('加载分类统计失败:', error);
+        alert('加载分类统计失败');
+      }
+    }
+    loadCategoryStats();
+
+    // 批量更新分类
+    document.getElementById('updateCategories').onclick = async () => {
+      const oldCategory = document.getElementById('oldCategory').value;
+      const newCategory = document.getElementById('newCategory').value;
+
+      if (!oldCategory || !newCategory) {
+        alert('请选择原分类和新分类');
+        return;
+      }
+
+      if (oldCategory === newCategory) {
+        alert('新分类不能与原分类相同');
+        return;
+      }
+
+      if (!confirm(`确定将所有"${oldCategory}"分类的视频改为"${newCategory}"分类吗？`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/admin/categories/batch', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ oldCategory, newCategory })
+        });
+
+        if (!res.ok) {
+          throw new Error('更新失败');
+        }
+
+        const result = await res.json();
+        alert(result.message);
+        loadCategoryStats();
+      } catch (error) {
+        console.error('更新分类失败:', error);
+        alert('更新分类失败');
+      }
+    };
+
+    // 添加新分类
+    document.getElementById('addCategory').onclick = async () => {
+      const newCategoryInput = document.getElementById('newCategory');
+      const newCategoryName = newCategoryInput.value.trim();
+
+      if (!newCategoryName) {
+        alert('请输入分类名称');
+        return;
+      }
+
+      if (newCategoryName === '其他') {
+        alert('"其他"为系统保留分类');
+        return;
+      }
+
+      try {
+        const categoriesRes = await fetch('/admin/categories', { credentials: 'same-origin' });
+        const { categories } = await categoriesRes.json();
+
+        if (categories.includes(newCategoryName)) {
+          alert('该分类已存在');
+          return;
+        }
+
+        const updateRes = await fetch('/admin/categories', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ categories: [...categories, newCategoryName] })
+        });
+
+        if (!updateRes.ok) {
+          throw new Error('添加分类失败');
+        }
+
+        alert('添加分类成功');
+        newCategoryInput.value = '';
+        loadCategoryStats();
+      } catch (error) {
+        console.error('添加分类失败:', error);
+        alert('添加分类失败');
+      }
+    };
   </script>
 </body>
 </html> 

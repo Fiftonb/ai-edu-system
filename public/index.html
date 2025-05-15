@@ -15,16 +15,6 @@
   </header>
 
   <div class="container">
-    <!-- 上传视频模块 -->
-    <div class="card">
-    <h2>上传视频</h2>
-    <form id="uploadForm">
-      <input type="file" id="videoFiles" accept="video/*" multiple required>
-        <button type="submit" class="btn btn-primary">批量上传</button>
-    </form>
-      <progress id="uploadProgress" value="0" max="100" style="display:none; width:100%; margin-top:10px;"></progress>
-  </div>
-
     <!-- 视频列表模块 -->
     <div class="card">
     <h2>视频列表</h2>
@@ -32,12 +22,13 @@
       <div id="videoList" class="video-container"></div>
     </div>
 
-    <!-- 用户反馈模块 -->
-    <div class="card" id="feedbackSection">
-      <h2>用户反馈</h2>
-      <textarea id="feedbackInput" rows="4" placeholder="请输入您的反馈"></textarea>
-      <button id="feedbackSubmit" class="btn btn-primary">提交反馈</button>
-      <div id="feedbackList" style="margin-top:15px;"></div>
+    <!-- 智能推荐模块 -->
+    <div class="card" id="recommendationSection">
+      <div class="admin-controls">
+        <h2 style="margin-top:0;">智能推荐</h2>
+        <button id="refreshRec" class="btn btn-primary">重新推荐</button>
+      </div>
+      <div id="recommendResult">加载中...</div>
     </div>
 
     <!-- 学习进度模块 -->
@@ -49,13 +40,71 @@
       <div id="progressReport" class="progress-container">加载中...</div>
     </div>
 
-    <!-- 智能推荐模块 -->
-    <div class="card" id="recommendationSection">
-      <div class="admin-controls">
-        <h2 style="margin-top:0;">智能推荐</h2>
-        <button id="refreshRec" class="btn btn-primary">重新推荐</button>
-      </div>
-      <div id="recommendResult">加载中...</div>
+    <!-- 用户反馈模块 -->
+    <div class="card" id="feedbackSection">
+      <h2>用户反馈</h2>
+      <textarea id="feedbackInput" rows="4" placeholder="请输入您的反馈"></textarea>
+      <button id="feedbackSubmit" class="btn btn-primary">提交反馈</button>
+      <div id="feedbackList" style="margin-top:15px;"></div>
+    </div>
+
+    <!-- 上传视频模块 -->
+    <div class="card">
+      <h2>上传视频</h2>
+      <form id="uploadForm" class="upload-form">
+        <div class="upload-grid">
+          <div class="upload-preview">
+            <h3>预览</h3>
+            <div id="previewContainer" class="preview-container">
+              <div class="video-item">
+                <div class="video-thumbnail">
+                  <div class="preview-placeholder">
+                    <i class="fa fa-file-video-o"></i>
+                    <p>选择视频后在此处预览</p>
+                  </div>
+                </div>
+                <div class="video-info">
+                  <div class="video-title">未选择视频</div>
+                  <div class="video-meta">
+                    <span>大小: 0 MB</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="upload-controls">
+            <div class="form-group">
+              <label for="videoFiles">选择视频文件</label>
+              <input type="file" id="videoFiles" accept="video/*" multiple required>
+              <small class="form-text">支持多个视频文件同时上传</small>
+            </div>
+            
+            <div id="uploadList" class="upload-list">
+              <!-- 待上传文件列表将在此显示 -->
+            </div>
+
+            <div class="form-group">
+              <label>选择分类</label>
+              <div id="uploadCategories" class="upload-categories">
+                <!-- 分类选项将通过 JavaScript 动态添加 -->
+              </div>
+              <small class="form-text">请选择视频分类，不选择时系统将自动分类</small>
+            </div>
+
+            <div class="upload-actions">
+              <button type="submit" class="btn btn-primary">开始上传</button>
+              <button type="reset" class="btn btn-secondary">重置</button>
+            </div>
+          </div>
+        </div>
+        <div class="upload-progress" style="display:none;">
+          <div class="progress-info">
+            <span class="progress-text">正在上传...</span>
+            <span class="progress-percent">0%</span>
+          </div>
+          <progress id="uploadProgress" value="0" max="100"></progress>
+        </div>
+      </form>
     </div>
 
     <footer>
@@ -138,8 +187,42 @@
     loadFeedback();
     
     // 分类筛选和显示逻辑
-    const categories = ['语文', '数学', '英语', '其他'];
     let selectedCategory = 'all';
+    let categories = [];
+    let categoriesCache = null;
+    let lastCategoriesFetch = 0;
+    const CATEGORIES_CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存时间
+
+    // 获取分类列表
+    async function loadCategories() {
+      try {
+        const now = Date.now();
+        // 如果缓存存在且未过期，直接使用缓存
+        if (categoriesCache && (now - lastCategoriesFetch) < CATEGORIES_CACHE_TTL) {
+          categories = categoriesCache;
+          renderCategoryFilters();
+          updateUploadCategories();
+          return;
+        }
+
+        const res = await fetch('/categories', { credentials: 'same-origin' });
+        if (!res.ok) {
+          throw new Error('获取分类失败');
+        }
+        const data = await res.json();
+        categories = data.categories;
+        // 更新缓存
+        categoriesCache = categories;
+        lastCategoriesFetch = now;
+        renderCategoryFilters();
+        updateUploadCategories();
+      } catch (error) {
+        console.error('加载分类失败:', error);
+        categories = ['语文', '数学', '英语', '其他'];
+        renderCategoryFilters();
+        updateUploadCategories();
+      }
+    }
 
     function renderCategoryFilters() {
       const container = document.getElementById('categoryFilters');
@@ -161,98 +244,230 @@
       });
     }
 
-    // 文件上传逻辑
-    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const videoFiles = document.getElementById('videoFiles').files;
+    // 更新上传表单中的分类选项
+    function updateUploadCategories() {
+      const container = document.getElementById('uploadCategories');
+      container.innerHTML = '';
+      
+      // 添加"自动分类"选项
+      const autoDiv = document.createElement('div');
+      autoDiv.className = 'category-option';
+      autoDiv.innerHTML = `
+        <input type="radio" name="uploadCategory" id="category_auto" value="" checked>
+        <label for="category_auto">自动分类</label>
+      `;
+      container.appendChild(autoDiv);
+      
+      // 添加其他分类选项
+      categories.forEach(category => {
+        const div = document.createElement('div');
+        div.className = 'category-option';
+        div.innerHTML = `
+          <input type="radio" name="uploadCategory" id="category_${category}" value="${category}">
+          <label for="category_${category}">${category}</label>
+        `;
+        container.appendChild(div);
+      });
+    }
 
-      if (videoFiles.length === 0) {
-        alert('请选择视频文件');
+    // 更新待上传文件列表
+    function updateUploadList() {
+      const files = document.getElementById('videoFiles').files;
+      const container = document.getElementById('uploadList');
+      container.innerHTML = '';
+      
+      if (files.length === 0) {
+        container.innerHTML = '<div class="no-files">未选择文件</div>';
+        return;
+      }
+      
+      Array.from(files).forEach((file, index) => {
+        const item = document.createElement('div');
+        item.className = 'upload-item';
+        item.innerHTML = `
+          <div class="file-info">
+            <span class="file-name">${file.name}</span>
+            <span class="file-size">${(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+          </div>
+          <button type="button" class="btn-remove" data-index="${index}">
+            <i class="fa fa-times"></i>
+          </button>
+        `;
+        
+        // 添加取消按钮的点击事件
+        const removeBtn = item.querySelector('.btn-remove');
+        removeBtn.onclick = function() {
+          const dt = new DataTransfer();
+          const input = document.getElementById('videoFiles');
+          const { files } = input;
+          
+          for(let i = 0; i < files.length; i++) {
+            if(i !== parseInt(this.dataset.index)) {
+              dt.items.add(files[i]);
+            }
+          }
+          
+          input.files = dt.files;
+          updateUploadList();
+          // 如果没有文件了，重置预览
+          if(dt.files.length === 0) {
+            resetPreview();
+          }
+        };
+        
+        container.appendChild(item);
+      });
+    }
+
+    // 添加重置预览的函数
+    function resetPreview() {
+      const previewContainer = document.getElementById('previewContainer');
+      previewContainer.innerHTML = `
+        <div class="video-item">
+          <div class="video-thumbnail">
+            <div class="preview-placeholder">
+              <i class="fa fa-file-video-o"></i>
+              <p>选择视频后在此处预览</p>
+            </div>
+          </div>
+          <div class="video-info">
+            <div class="video-title">未选择视频</div>
+            <div class="video-meta">
+              <span>大小: 0 MB</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 修改重置按钮事件处理
+    document.querySelector('#uploadForm button[type="reset"]').addEventListener('click', () => {
+      resetPreview();
+      document.getElementById('videoFiles').value = '';
+      updateUploadList();
+    });
+
+    // 页面加载时初始化分类列表
+    document.addEventListener('DOMContentLoaded', function() {
+      loadCategories();
+    });
+
+    // 文件选择事件处理
+    document.getElementById('videoFiles').addEventListener('change', (e) => {
+      updateUploadList();
+      
+      // 更新预览
+      const files = e.target.files;
+      const previewContainer = document.getElementById('previewContainer');
+      
+      if (files.length > 0) {
+        const file = files[0];
+        const videoItem = document.createElement('div');
+        videoItem.className = 'video-item';
+        
+        const thumbnailContainer = document.createElement('div');
+        thumbnailContainer.className = 'video-thumbnail';
+        
+        const video = document.createElement('video');
+        video.src = URL.createObjectURL(file);
+        video.controls = true;
+        
+        thumbnailContainer.appendChild(video);
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'video-info';
+        
+        const title = document.createElement('div');
+        title.className = 'video-title';
+        title.textContent = file.name;
+        
+        const meta = document.createElement('div');
+        meta.className = 'video-meta';
+        meta.innerHTML = `
+          <span>大小: ${(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+          <span>类型: ${file.type}</span>
+        `;
+        
+        infoDiv.appendChild(title);
+        infoDiv.appendChild(meta);
+        
+        videoItem.appendChild(thumbnailContainer);
+        videoItem.appendChild(infoDiv);
+        
+        previewContainer.innerHTML = '';
+        previewContainer.appendChild(videoItem);
+      } else {
+        previewContainer.innerHTML = `
+          <div class="video-item">
+            <div class="video-thumbnail">
+              <div class="preview-placeholder">
+                <i class="fa fa-file-video-o"></i>
+                <p>选择视频后在此处预览</p>
+              </div>
+            </div>
+            <div class="video-info">
+              <div class="video-title">未选择视频</div>
+              <div class="video-meta">
+                <span>大小: 0 MB</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    // 修改上传处理函数
+    document.getElementById('uploadForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const files = document.getElementById('videoFiles').files;
+      if (!files.length) {
+        alert('请选择要上传的视频文件');
         return;
       }
 
       const formData = new FormData();
-      for (let i = 0; i < videoFiles.length; i++) {
-        formData.append('videos', videoFiles[i]);
+      for (let i = 0; i < files.length; i++) {
+        formData.append('videos', files[i]);
+      }
+
+      // 获取选择的分类
+      const selectedCategory = document.querySelector('input[name="uploadCategory"]:checked').value;
+      if (selectedCategory) {
+        formData.append('category', selectedCategory);
       }
 
       try {
-        const progressEl = document.getElementById('uploadProgress');
-        const uploadBtn = document.querySelector('#uploadForm button[type="submit"]');
-        progressEl.style.display = 'block';
-        uploadBtn.disabled = true;
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/uploadBatch');
-        xhr.withCredentials = true;
-        xhr.upload.onprogress = function (event) {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            progressEl.value = percent;
-          }
-        };
-        xhr.onreadystatechange = function () {
-          if (xhr.readyState === 4) {
-            uploadBtn.disabled = false;
-            progressEl.style.display = 'none';
-            if (xhr.status === 200) {
-              let result;
-              try { result = JSON.parse(xhr.responseText); } catch { alert('上传失败: 响应非 JSON'); return; }
-        if (result.success) {
-                alert('批量上传成功');
-          document.getElementById('videoFiles').value = '';
-                loadVideos();
-        } else {
-          alert('上传失败');
-        }
-            } else {
-              alert('上传失败: ' + xhr.status);
-            }
-          }
-        };
-        xhr.onerror = function () {
-          uploadBtn.disabled = false;
-          progressEl.style.display = 'none';
-          alert('上传失败: 网络错误');
-        };
-        xhr.send(formData);
-      } catch (error) {
-        console.error('上传失败:', error);
-        alert('上传失败');
-      }
-    });
-    
-    // 绑定反馈提交
-    document.getElementById('feedbackSubmit').addEventListener('click', async () => {
-      const content = document.getElementById('feedbackInput').value.trim();
-      if (!content) {
-        alert('请输入反馈内容');
-        return;
-      }
-      try {
-        const res = await fetch('/feedback', {
+        document.querySelector('.upload-progress').style.display = 'block';
+        const res = await fetch('/uploadBatch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ content })
+          body: formData,
+          credentials: 'same-origin'
         });
-        if (res.ok) {
-          alert('反馈提交成功');
-          document.getElementById('feedbackInput').value = '';
-          loadFeedback();
+
+        const result = await res.json();
+        if (result.success) {
+          alert('上传成功');
+          document.getElementById('uploadForm').reset();
+          loadVideos();
         } else {
-          alert('反馈提交失败: ' + res.status);
+          alert('上传失败: ' + result.message);
         }
       } catch (error) {
-        console.error('提交反馈失败:', error);
-        alert('提交反馈失败');
+        console.error('上传错误:', error);
+        alert('上传失败');
+      } finally {
+        document.querySelector('.upload-progress').style.display = 'none';
       }
-    });
+    };
 
     async function loadVideos() {
       try {
         // 获取视频列表，携带同源 Cookie
         const response = await fetch('/videos', { credentials: 'same-origin' });
         const videos = await response.json();
+        
+        console.log('获取到的视频数据:', videos);
+        
         // 为每个视频解析 uploadTime 并排序
         const videosWithTs = videos.map(v => {
           return {
@@ -274,19 +489,27 @@
           return;
         }
 
+        console.log('过滤后的视频:', filteredVideos);
+
         filteredVideos.forEach(video => {
           const videoDiv = document.createElement('div');
           videoDiv.className = 'video-item';
           
+          // 创建缩略图容器
+          const thumbnailContainer = document.createElement('div');
+          thumbnailContainer.className = 'video-thumbnail';
+          
           const videoEl = document.createElement('video');
           videoEl.controls = true;
-          videoEl.width = 280;
           
           const source = document.createElement('source');
-          source.src = video.path || video.videoPath;
+          source.src = `/uploads/${video.path}`;
           source.type = 'video/mp4';
           
+          console.log('视频路径:', source.src);
+          
           videoEl.appendChild(source);
+          thumbnailContainer.appendChild(videoEl);
           
           const infoDiv = document.createElement('div');
           infoDiv.className = 'video-info';
@@ -299,82 +522,26 @@
           meta.className = 'video-meta';
           meta.innerHTML = `
             <span>分类: ${video.category || '未分类'}</span>
-            <span style="margin-left:10px;">上传时间: ${new Date(video.uploadTime).toLocaleString()}</span>
+            <span class="upload-time">上传时间: ${new Date(video.uploadTime).toLocaleString()}</span>
           `;
           
           const actions = document.createElement('div');
-          actions.style.marginTop = '10px';
+          actions.className = 'video-actions';
           
           // 分类设置按钮
-          if (video.category) {
-            const catBtn = document.createElement('span');
-            catBtn.textContent = `修改分类`;
-            catBtn.className = 'btn btn-outline';
-            catBtn.style.fontSize = '12px';
-            catBtn.onclick = async (e) => {
-              e.stopPropagation();
-              const newCategory = prompt('请选择分类（语文/数学/英语/其他）:', video.category);
-              if (!newCategory || !categories.includes(newCategory)) {
-                alert('请输入有效分类');
-                return;
-              }
-              try {
-                const videoPath = video.path || video.videoPath;
-                const res = await fetch(`/video/${encodeURIComponent(videoPath)}/category`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'same-origin',
-                  body: JSON.stringify({ category: newCategory })
-                });
-                if (res.ok) {
-                  alert('更新分类成功');
-                  loadVideos();
-                } else {
-                  alert('更新分类失败: ' + res.status);
-                }
-              } catch (error) {
-                console.error('更新分类失败:', error);
-                alert('更新分类失败');
-              }
-            };
-            actions.appendChild(catBtn);
-          } else {
-            const catBtn = document.createElement('span');
-            catBtn.textContent = `设置分类`;
-            catBtn.className = 'btn btn-outline';
-            catBtn.style.fontSize = '12px';
-            catBtn.onclick = async (e) => {
-              e.stopPropagation();
-              const newCategory = prompt('请选择分类（语文/数学/英语/其他）:');
-              if (!newCategory || !categories.includes(newCategory)) {
-                alert('请输入有效分类');
-                return;
-              }
-              try {
-                const videoPath = video.path || video.videoPath;
-                const res = await fetch(`/video/${encodeURIComponent(videoPath)}/category`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'same-origin',
-                  body: JSON.stringify({ category: newCategory })
-                });
-                if (res.ok) {
-                  alert('设置分类成功');
-                  loadVideos();
-                } else {
-                  alert('设置分类失败: ' + res.status);
-                }
-              } catch (error) {
-                console.error('设置分类失败:', error);
-                alert('设置分类失败');
-              }
-            };
-            actions.appendChild(catBtn);
-          }
+          const catBtn = document.createElement('span');
+          catBtn.textContent = video.category ? '修改分类' : '设置分类';
+          catBtn.className = 'btn btn-outline';
+          catBtn.style.fontSize = '12px';
+          catBtn.onclick = async (e) => {
+            e.stopPropagation();
+            await handleCategoryChange(video.path, video.category);
+          };
+          actions.appendChild(catBtn);
           
           // 删除按钮
           const deleteBtn = document.createElement('span');
-          deleteBtn.textContent = `删除`;
+          deleteBtn.textContent = '删除';
           deleteBtn.className = 'btn btn-accent';
           deleteBtn.style.fontSize = '12px';
           deleteBtn.style.marginLeft = '10px';
@@ -404,7 +571,7 @@
           infoDiv.appendChild(meta);
           infoDiv.appendChild(actions);
           
-          videoDiv.appendChild(videoEl);
+          videoDiv.appendChild(thumbnailContainer);
           videoDiv.appendChild(infoDiv);
           
           container.appendChild(videoDiv);
@@ -413,17 +580,25 @@
         // 学习数据埋点：视频播放完成上报
         document.querySelectorAll('#videoList video').forEach(videoEl => {
           const src = videoEl.querySelector('source').getAttribute('src');
+          const videoItem = videoEl.closest('.video-item');
+          const videoTitle = videoItem.querySelector('.video-title').textContent;
+          
           // 播放开始上报点击次数
           videoEl.addEventListener('play', async () => {
             await fetch('/watch-history', {
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoPath: src, completed: false })
+              body: JSON.stringify({ 
+                videoPath: src, 
+                title: videoTitle,
+                completed: false 
+              })
             });
             // 刷新学习进度
             loadLearningData();
           });
+          
           // 播放进度上报（paused 或 timeupdate）
           videoEl.addEventListener('pause', async () => {
             const progress = videoEl.currentTime / videoEl.duration;
@@ -431,18 +606,28 @@
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoPath: src, completed: false, progress })
+              body: JSON.stringify({ 
+                videoPath: src, 
+                title: videoTitle,
+                completed: false, 
+                progress 
+              })
             });
             // 刷新学习进度
             loadLearningData();
           });
+          
           // 播放结束上报完成
           videoEl.addEventListener('ended', async () => {
             await fetch('/watch-history', {
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ videoPath: src, completed: true })
+              body: JSON.stringify({ 
+                videoPath: src, 
+                title: videoTitle,
+                completed: true 
+              })
             });
             // 刷新学习进度
             loadLearningData();
@@ -458,6 +643,14 @@
     // 加载学习进度
     async function loadLearningData() {
       try {
+        // 先获取所有视频信息
+        const videosRes = await fetch('/videos', { credentials: 'same-origin' });
+        const videos = await videosRes.json();
+        const videoMap = new Map(videos.map(v => [
+          v.path || v.videoPath, 
+          { title: v.title || (v.path || v.videoPath).split('/').pop() }
+        ]));
+
         const res = await fetch('/report/progress', { credentials: 'same-origin' });
         const data = await res.json();
         const el = document.getElementById('progressReport');
@@ -470,8 +663,10 @@
             details.forEach(d => {
               const count = typeof d.clickCount === 'number' ? d.clickCount : 0;
               const pct = typeof d.highestProgress === 'number' ? (d.highestProgress * 100).toFixed(2) : '0.00';
+              const videoInfo = videoMap.get(d.videoPath.replace('/uploads/', ''));
+              const title = (videoInfo && videoInfo.title) || d.title || d.videoPath;
               html += `<li>
-                <div class="progress-title">${d.title || d.videoPath}</div>
+                <div class="progress-title">${title}</div>
                 <div class="progress-info">点击次数: ${count}, 最高进度: ${pct}%</div>
                 <div class="progress-date">${new Date(d.timestamp).toLocaleString()}</div>
               </li>`;
@@ -493,24 +688,94 @@
         const res = await fetch('/recommendation', { credentials: 'same-origin' });
         const data = await res.json();
         const el = document.getElementById('recommendResult');
-        if (data.success) {
+        
+        if (data.success && data.recommendation) {
           const rec = data.recommendation;
-          // 使用嵌入式视频播放器展示推荐视频
-          el.innerHTML = `
-            <div class="video-item">
-              <div class="video-title">推荐视频: ${rec.title}</div>
-              <video controls width="100%" style="max-width:500px; margin-top:10px;">
-                <source src="${rec.videoPath}" type="video/mp4">
-                您的浏览器不支持视频播放。
-              </video>
-            </div>
-          `;
+          
+          // 创建与视频列表一致的布局
+          const videoDiv = document.createElement('div');
+          videoDiv.className = 'video-item';
+          
+          // 创建缩略图容器
+          const thumbnailContainer = document.createElement('div');
+          thumbnailContainer.className = 'video-thumbnail';
+          
+          const videoEl = document.createElement('video');
+          videoEl.controls = true;
+          
+          const source = document.createElement('source');
+          source.src = rec.videoPath;
+          source.type = 'video/mp4';
+          
+          videoEl.appendChild(source);
+          thumbnailContainer.appendChild(videoEl);
+          
+          // 视频信息区域
+          const infoDiv = document.createElement('div');
+          infoDiv.className = 'video-info';
+          
+          const title = document.createElement('div');
+          title.className = 'video-title';
+          title.textContent = `推荐: ${rec.title}`;
+          
+          const meta = document.createElement('div');
+          meta.className = 'video-meta recommended-badge';
+          meta.innerHTML = '系统推荐，根据您的观看习惯生成';
+          
+          infoDiv.appendChild(title);
+          infoDiv.appendChild(meta);
+          
+          videoDiv.appendChild(thumbnailContainer);
+          videoDiv.appendChild(infoDiv);
+          
+          // 添加学习数据埋点
+          videoEl.addEventListener('play', async () => {
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoPath: rec.videoPath.replace('/uploads/', ''), completed: false })
+            });
+            loadLearningData();
+          });
+          
+          videoEl.addEventListener('pause', async () => {
+            const progress = videoEl.currentTime / videoEl.duration;
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                videoPath: rec.videoPath.replace('/uploads/', ''), 
+                completed: false, 
+                progress 
+              })
+            });
+            loadLearningData();
+          });
+          
+          videoEl.addEventListener('ended', async () => {
+            await fetch('/watch-history', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                videoPath: rec.videoPath.replace('/uploads/', ''), 
+                completed: true 
+              })
+            });
+            loadLearningData();
+          });
+          
+          // 清空容器并添加新元素
+          el.innerHTML = '';
+          el.appendChild(videoDiv);
         } else {
-          el.innerText = data.message || '无推荐';
+          el.innerHTML = `<div class="no-recommendation">${data.message || '暂无推荐视频'}</div>`;
         }
       } catch (e) {
-        console.error('加载推荐失败', e);
-        document.getElementById('recommendResult').innerText = '加载推荐失败';
+        console.error('加载推荐失败:', e);
+        document.getElementById('recommendResult').innerHTML = '<div class="no-recommendation">加载推荐失败</div>';
       }
     }
     document.getElementById('refreshRec').onclick = loadRecommendation;
@@ -521,8 +786,16 @@
     document.getElementById('clearHistory').onclick = async () => {
       if (!confirm('确定要清空所有学习记录？')) return;
       try {
-        const res = await fetch('/watch-history', { method: 'DELETE', credentials: 'same-origin' });
+        console.log('发送清空学习记录请求');
+        const res = await fetch('/watch-history', { 
+          method: 'DELETE', 
+          credentials: 'same-origin' 
+        });
+        console.log('清空学习记录响应状态:', res.status);
+        
         const data = await res.json();
+        console.log('清空学习记录响应:', data);
+        
         if (data.success) {
           alert('学习记录已清空');
           loadLearningData();
@@ -531,9 +804,42 @@
         }
       } catch (e) {
         console.error('清空学习记录失败', e);
-        alert('清空失败');
+        alert('清空失败: ' + e.message);
       }
     };
+
+    // 修改分类按钮事件处理
+    async function handleCategoryChange(videoPath, currentCategory) {
+      try {
+        // 使用缓存的分类列表
+        if (!categoriesCache) {
+          await loadCategories();
+        }
+        
+        const newCategory = prompt('请选择分类：\n' + categoriesCache.join('、'), currentCategory);
+        if (!newCategory || !categoriesCache.includes(newCategory)) {
+          alert('请选择有效分类');
+          return;
+        }
+        
+        const res2 = await fetch(`/video/${encodeURIComponent(videoPath)}/category`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ category: newCategory })
+        });
+        
+        if (res2.ok) {
+          alert('更新分类成功');
+          loadVideos();
+        } else {
+          alert('更新分类失败: ' + res2.status);
+        }
+      } catch (error) {
+        console.error('更新分类失败:', error);
+        alert('更新分类失败');
+      }
+    }
   </script>
   <script src="/js/chat.js"></script>
 </body>
