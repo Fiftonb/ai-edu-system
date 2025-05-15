@@ -2,6 +2,35 @@
 
 这是一个基于 Node.js 和 Express 框架开发的教育视频管理系统。系统能够对上传的教育视频进行智能分类，并提供视频管理、观看和个性化推荐等功能。
 
+## 技术栈
+
+- Node.js
+- Express.js
+- JSON 文件数据存储
+- Express Session
+- Multer（文件上传）
+- Bcrypt（密码加密）
+- Axios（HTTP 客户端）
+
+## 安装说明
+
+1. 克隆项目到本地：
+```bash
+git clone https://github.com/Fiftonb/ai-edu-system.git
+```
+
+2. 安装依赖：
+```bash
+npm install
+```
+
+3. 启动服务器：
+```bash
+node app.js
+```
+
+服务器将在 http://localhost:3001 启动
+
 ## 功能特性
 
 - 🔐 用户认证
@@ -24,35 +53,6 @@
   - 观看历史记录
   - 用户反馈收集
   - 数据统计分析
-
-## 技术栈
-
-- Node.js
-- Express.js
-- JSON 文件数据存储
-- Express Session
-- Multer（文件上传）
-- Bcrypt（密码加密）
-- Axios（HTTP 客户端）
-
-## 安装说明
-
-1. 克隆项目到本地：
-```bash
-git clone [项目地址]
-```
-
-2. 安装依赖：
-```bash
-npm install
-```
-
-3. 启动服务器：
-```bash
-node app.js
-```
-
-服务器将在 http://localhost:3001 启动
 
 ## 目录结构
 
